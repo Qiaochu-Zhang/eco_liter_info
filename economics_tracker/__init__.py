@@ -1,0 +1,2 @@
+"""Economics journal tracking package."""
+
