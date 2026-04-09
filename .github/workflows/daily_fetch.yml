@@ -21,11 +21,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Compute date range (UTC yesterday and day before)
+      - name: Compute date range
         id: dates
         run: |
-          FROM=$(date -u -d "2 days ago" +%Y-%m-%d)
-          UNTIL=$(date -u -d "1 day ago" +%Y-%m-%d)
+          # RSS journals (Econometrica/REStud/QJE) ignore dates and always fetch the current feed.
+          # Crossref fallback (AER/AEJ/JPE) needs a 30-day window because these are monthly journals.
+          FROM=$(date -u -d "90 days ago" +%Y-%m-%d)
+          UNTIL=$(date -u +%Y-%m-%d)
           TODAY=$(date -u +%Y-%m-%d)
           echo "from_date=$FROM" >> $GITHUB_OUTPUT
           echo "until_date=$UNTIL" >> $GITHUB_OUTPUT
@@ -44,5 +46,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add output/daily/${{ steps.dates.outputs.today }}.xlsx
           git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "daily: ${{ steps.dates.outputs.today }} (${{ steps.dates.outputs.from_date }} ~ ${{ steps.dates.outputs.until_date }})"
+          git commit -m "daily: ${{ steps.dates.outputs.today }} (crossref window: ${{ steps.dates.outputs.from_date }} ~ ${{ steps.dates.outputs.until_date }})"
           git push
