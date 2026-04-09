@@ -1,4 +1,4 @@
-name: Weekly Merge
+name: Weekly Journal Fetch
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  merge:
+  fetch:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,39 +21,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Compute week label
-        id: week
+      - name: Compute date range (past 30 days)
+        id: dates
         run: |
+          FROM=$(date -u -d "30 days ago" +%Y-%m-%d)
+          UNTIL=$(date -u +%Y-%m-%d)
           LABEL=$(date -u +%Y-W%V)
+          echo "from_date=$FROM" >> $GITHUB_OUTPUT
+          echo "until_date=$UNTIL" >> $GITHUB_OUTPUT
           echo "label=$LABEL" >> $GITHUB_OUTPUT
 
-      - name: Merge daily files from the past 7 days
+      - name: Fetch and classify articles
         run: |
-          python - <<'EOF'
-          from pathlib import Path
-          from economics_tracker.merger import merge_daily_files
-          from datetime import date, timedelta
-
-          today = date.today()
-          cutoff = today - timedelta(days=7)
-          daily_dir = Path("output/daily")
-          files = sorted(
-              p for p in daily_dir.glob("*.xlsx")
-              if p.stem >= str(cutoff)
-          )
-          print(f"Merging {len(files)} file(s): {[p.name for p in files]}")
-          if not files:
-              print("Nothing to merge.")
-          else:
-              out = merge_daily_files(files, Path("output/weekly/${{ steps.week.outputs.label }}.xlsx"))
-              print(f"Saved: {out}")
-          EOF
+          python main.py \
+            --from-date ${{ steps.dates.outputs.from_date }} \
+            --until-date ${{ steps.dates.outputs.until_date }} \
+            --output output/weekly/${{ steps.dates.outputs.label }}.xlsx
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add output/weekly/
-          git diff --cached --quiet && echo "No new weekly file" && exit 0
-          git commit -m "weekly: ${{ steps.week.outputs.label }}"
+          git add output/weekly/${{ steps.dates.outputs.label }}.xlsx
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "weekly: ${{ steps.dates.outputs.label }} (${{ steps.dates.outputs.from_date }} ~ ${{ steps.dates.outputs.until_date }})"
           git push
