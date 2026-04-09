@@ -402,15 +402,8 @@ class RepecIdeasProvider:
 
 
 class JournalSourceCollector:
-    def __init__(
-        self,
-        provider: RepecIdeasProvider | None = None,
-        from_date: str = "",
-        until_date: str = "",
-    ) -> None:
+    def __init__(self, provider: RepecIdeasProvider | None = None) -> None:
         self.provider = provider or RepecIdeasProvider()
-        self.from_date = from_date
-        self.until_date = until_date
 
     def collect(self) -> list[Article]:
         articles: list[Article] = []
@@ -421,7 +414,7 @@ class JournalSourceCollector:
     def _collect_for_journal(self, journal: JournalConfig) -> list[Article]:
         seeded: list[Article] = []
 
-        # 1. Try RSS
+        # 1. Try RSS — collect everything the feed currently contains
         if journal.rss_url:
             try:
                 feed = fetch_url(journal.rss_url)
@@ -430,10 +423,18 @@ class JournalSourceCollector:
             if feed:
                 seeded.extend(parse_rss_feed(feed, journal.name))
 
-        # 2. Fallback to Crossref journal search when RSS unavailable or empty
-        if not seeded and journal.issn and self.from_date:
-            until = self.until_date or self.from_date
-            seeded.extend(collect_from_crossref_journal(journal, self.from_date, until))
+        # 2. Crossref fallback when RSS unavailable or empty:
+        #    only keep articles whose issue was published in the current month
+        if not seeded and journal.issn:
+            import datetime
+            today = datetime.date.today()
+            from_date = today.strftime("%Y-%m-01")
+            until_date = today.strftime("%Y-%m-%d")
+            candidates = collect_from_crossref_journal(journal, from_date, until_date)
+            current_ym = (today.year, today.month)
+            for art in candidates:
+                if _article_issue_month(art) == current_ym:
+                    seeded.append(art)
 
         # 3. Enrich each article: Crossref by DOI → journal page
         for article in seeded:
@@ -443,3 +444,25 @@ class JournalSourceCollector:
             enrich_from_journal_page(article)
 
         return seeded
+
+
+def _article_issue_month(article: Article) -> tuple[int, int] | None:
+    """Parse (year, month) from article.date; return None if unparseable."""
+    import datetime
+    raw = (article.date or "").strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+        try:
+            d = datetime.datetime.strptime(raw[:len(fmt) + 2], fmt)
+            return (d.year, d.month)
+        except ValueError:
+            continue
+    # try partial "YYYY-M" or "YYYY"
+    parts = raw.split("-")
+    try:
+        if len(parts) >= 2:
+            return (int(parts[0]), int(parts[1]))
+        if len(parts) == 1 and parts[0].isdigit():
+            return (int(parts[0]), 1)
+    except ValueError:
+        pass
+    return None

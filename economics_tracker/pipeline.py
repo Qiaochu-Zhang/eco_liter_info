@@ -8,6 +8,16 @@ from economics_tracker.models import Article
 from economics_tracker.sources import JournalSourceCollector
 
 
+_JUNK_TITLE_PATTERNS = ("front matter", "recent referees")
+
+
+def filter_junk(articles: list[Article]) -> list[Article]:
+    return [
+        a for a in articles
+        if not any(p in a.title.lower() for p in _JUNK_TITLE_PATTERNS)
+    ]
+
+
 def dedupe_articles(articles: list[Article]) -> list[Article]:
     seen: set[tuple[str, str]] = set()
     unique: list[Article] = []
@@ -29,9 +39,10 @@ def apply_classification(articles: list[Article]) -> list[Article]:
     return articles
 
 
-def run_pipeline(output_path: str | Path, from_date: str = "", until_date: str = "") -> Path:
-    collector = JournalSourceCollector(from_date=from_date, until_date=until_date)
+def run_pipeline(output_path: str | Path) -> Path:
+    collector = JournalSourceCollector()
     articles = collector.collect()
+    articles = filter_junk(articles)
     articles = dedupe_articles(articles)
     articles = apply_classification(articles)
     return export_articles_to_excel(articles, output_path)

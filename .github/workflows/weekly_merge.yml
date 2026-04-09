@@ -1,8 +1,8 @@
-name: Weekly Journal Fetch
+name: Monthly Journal Fetch
 
 on:
   schedule:
-    - cron: "0 5 * * 5"   # 每周五 UTC 05:00
+    - cron: "0 5 10 * *"   # 每月10日 UTC 05:00
   workflow_dispatch:
 
 jobs:
@@ -21,28 +21,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Compute date range (past 30 days)
-        id: dates
-        run: |
-          FROM=$(date -u -d "30 days ago" +%Y-%m-%d)
-          UNTIL=$(date -u +%Y-%m-%d)
-          LABEL=$(date -u +%Y-W%V)
-          echo "from_date=$FROM" >> $GITHUB_OUTPUT
-          echo "until_date=$UNTIL" >> $GITHUB_OUTPUT
-          echo "label=$LABEL" >> $GITHUB_OUTPUT
+      - name: Compute output filename (YYYY-MM)
+        id: label
+        run: echo "label=$(date -u +%Y-%m)" >> $GITHUB_OUTPUT
 
       - name: Fetch and classify articles
         run: |
-          python main.py \
-            --from-date ${{ steps.dates.outputs.from_date }} \
-            --until-date ${{ steps.dates.outputs.until_date }} \
-            --output output/weekly/${{ steps.dates.outputs.label }}.xlsx
+          python main.py --output output/monthly/${{ steps.label.outputs.label }}.xlsx
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add output/weekly/${{ steps.dates.outputs.label }}.xlsx
+          git add output/monthly/${{ steps.label.outputs.label }}.xlsx
           git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "weekly: ${{ steps.dates.outputs.label }} (${{ steps.dates.outputs.from_date }} ~ ${{ steps.dates.outputs.until_date }})"
+          git commit -m "monthly: ${{ steps.label.outputs.label }}"
           git push
