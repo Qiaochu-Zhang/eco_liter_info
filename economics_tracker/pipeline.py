@@ -29,8 +29,8 @@ def apply_classification(articles: list[Article]) -> list[Article]:
     return articles
 
 
-def run_pipeline(output_path: str | Path) -> Path:
-    collector = JournalSourceCollector()
+def run_pipeline(output_path: str | Path, from_date: str = "", until_date: str = "") -> Path:
+    collector = JournalSourceCollector(from_date=from_date, until_date=until_date)
     articles = collector.collect()
     articles = dedupe_articles(articles)
     articles = apply_classification(articles)

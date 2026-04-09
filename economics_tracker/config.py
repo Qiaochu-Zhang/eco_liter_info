@@ -8,38 +8,45 @@ class JournalConfig:
     name: str
     homepage: str
     rss_url: str | None = None
+    issn: str = ""  # used for Crossref journal search fallback
 
 
 JOURNALS: tuple[JournalConfig, ...] = (
     JournalConfig(
         name="American Economic Review",
         homepage="https://www.aeaweb.org/journals/aer",
-        rss_url="https://www.aeaweb.org/journals/aer/rss.xml",
+        rss_url="https://rsshub.app/aeaweb/aer",
+        issn="0002-8282",
     ),
     JournalConfig(
         name="American Economic Journal: Economic Policy",
         homepage="https://www.aeaweb.org/journals/pol",
-        rss_url="https://www.aeaweb.org/journals/pol/rss.xml",
+        rss_url="https://rsshub.app/aeaweb/pol",
+        issn="1945-7731",
     ),
     JournalConfig(
         name="Econometrica",
         homepage="https://www.econometricsociety.org/publications/econometrica",
-        rss_url=None,
+        rss_url="https://onlinelibrary.wiley.com/feed/14680262/most-recent",
+        issn="0012-9682",
     ),
     JournalConfig(
         name="Journal of Political Economy",
         homepage="https://www.journals.uchicago.edu/toc/jpe/current",
-        rss_url="https://www.journals.uchicago.edu/action/showFeed?jc=jpe&type=etoc&feed=rss",
+        rss_url="https://www.journals.uchicago.edu/action/showFeed?type=etoc&feed=rss&jc=jpe",
+        issn="0022-3808",
     ),
     JournalConfig(
         name="Review of Economic Studies",
-        homepage="https://academic.oup.com/restud/issue/93/2",
-        rss_url="https://academic.oup.com/rss/site_5332/3242.xml",
+        homepage="https://academic.oup.com/restud",
+        rss_url="https://academic.oup.com/rss/site_5508/3369.xml",
+        issn="0034-6527",
     ),
     JournalConfig(
         name="The Quarterly Journal of Economics",
         homepage="https://academic.oup.com/qje",
-        rss_url="https://academic.oup.com/rss/site_5279.xml",
+        rss_url="https://academic.oup.com/rss/site_5504/3365.xml",
+        issn="0033-5533",
     ),
 )
 

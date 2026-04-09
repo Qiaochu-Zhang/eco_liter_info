@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -91,6 +92,7 @@ def parse_rss_feed(xml_text: str, journal_name: str) -> list[Article]:
                 ("author", "dc:creator", "{http://purl.org/dc/elements/1.1/}creator"),
             )
         )
+        doi = _extract_doi_from_item(item)
         if title and link:
             articles.append(
                 Article(
@@ -100,10 +102,30 @@ def parse_rss_feed(xml_text: str, journal_name: str) -> list[Article]:
                     date=date.strip(),
                     authors=authors,
                     abstract=clean_html(summary),
+                    doi=doi,
                     source="rss",
                 )
             )
     return articles
+
+
+def _extract_doi_from_item(item: ET.Element) -> str:
+    """Extract DOI from common RSS namespaces."""
+    doi = _find_text(
+        item,
+        (
+            "{http://prismstandard.org/namespaces/basic/2.0/}doi",
+            "{http://purl.org/dc/elements/1.1/}identifier",
+            "doi",
+        ),
+    )
+    if doi:
+        return _normalize_doi(doi)
+    # fallback: parse from guid if it looks like a DOI URL
+    guid = _find_text(item, ("guid",))
+    if guid and "doi.org" in guid:
+        return _normalize_doi(guid)
+    return ""
 
 
 def _find_text(node: ET.Element, names: tuple[str, ...]) -> str:
@@ -245,6 +267,120 @@ def _normalize_doi(value: str) -> str:
     return cleaned
 
 
+CROSSREF_API = "https://api.crossref.org/works/{doi}"
+CROSSREF_JOURNAL_API = "https://api.crossref.org/journals/{issn}/works"
+CROSSREF_USER_AGENT = "economics-journal-tracker/0.1 (mailto:tracker@example.com)"
+
+
+def enrich_from_crossref(article: Article) -> Article:
+    """Fetch structured metadata from Crossref by DOI."""
+    if not article.doi:
+        return article
+    url = CROSSREF_API.format(doi=urllib.parse.quote(article.doi, safe="/:"))
+    try:
+        request = urllib.request.Request(
+            url, headers={"User-Agent": CROSSREF_USER_AGENT}
+        )
+        with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace")).get("message", {})
+    except Exception:
+        return article
+
+    if not article.authors:
+        raw_authors = data.get("author", [])
+        article.authors = [
+            f"{a.get('given', '')} {a.get('family', '')}".strip()
+            for a in raw_authors
+            if a.get("family")
+        ]
+
+    if not article.abstract:
+        article.abstract = clean_html(data.get("abstract", ""))
+
+    if not article.date:
+        date_parts = (
+            data.get("published", {}).get("date-parts")
+            or data.get("published-print", {}).get("date-parts")
+            or data.get("published-online", {}).get("date-parts")
+            or [[]]
+        )
+        if date_parts and date_parts[0]:
+            article.date = "-".join(str(p) for p in date_parts[0])
+
+    if not article.jel_codes:
+        subjects = data.get("subject", [])
+        jel = [s.strip() for s in subjects if re.match(r"^[A-Z]\d{1,2}$", s.strip())]
+        if jel:
+            article.jel_codes = jel
+
+    article.source = (article.source + "+crossref").lstrip("+")
+    return article
+
+
+def collect_from_crossref_journal(
+    journal: JournalConfig,
+    from_date: str,
+    until_date: str,
+) -> list[Article]:
+    """Search Crossref for articles in a journal by ISSN and date range."""
+    if not journal.issn:
+        return []
+    params = urllib.parse.urlencode({
+        "filter": f"from-pub-date:{from_date},until-pub-date:{until_date}",
+        "rows": 50,
+        "sort": "published",
+        "order": "desc",
+        "select": "DOI,title,author,abstract,published,published-online,published-print,URL,subject,type",
+    })
+    url = CROSSREF_JOURNAL_API.format(issn=journal.issn) + "?" + params
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": CROSSREF_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as resp:
+            items = json.loads(resp.read().decode("utf-8", errors="replace")).get("message", {}).get("items", [])
+    except Exception:
+        return []
+
+    articles: list[Article] = []
+    for item in items:
+        # skip non-article types (e.g. book-review, editorial)
+        if item.get("type") not in ("journal-article", None):
+            continue
+        title_list = item.get("title", [])
+        title = title_list[0] if title_list else ""
+        if not title:
+            continue
+        doi = item.get("DOI", "")
+        art_url = item.get("URL", "") or (f"https://doi.org/{doi}" if doi else "")
+        raw_authors = item.get("author", [])
+        authors = [
+            f"{a.get('given', '')} {a.get('family', '')}".strip()
+            for a in raw_authors
+            if a.get("family")
+        ]
+        date_parts = (
+            item.get("published", {}).get("date-parts")
+            or item.get("published-print", {}).get("date-parts")
+            or item.get("published-online", {}).get("date-parts")
+            or [[]]
+        )
+        date = "-".join(str(p) for p in date_parts[0]) if date_parts and date_parts[0] else ""
+        abstract = clean_html(item.get("abstract", ""))
+        subjects = item.get("subject", [])
+        jel = [s.strip() for s in subjects if re.match(r"^[A-Z]\d{1,2}$", s.strip())]
+        articles.append(Article(
+            journal=journal.name,
+            title=clean_html(title),
+            url=art_url,
+            date=date,
+            authors=authors,
+            abstract=abstract,
+            doi=doi,
+            jel_codes=jel,
+            source="crossref-journal",
+        ))
+    return articles
+
+
 def _extract_jel_codes(html: str) -> list[str]:
     matches = re.findall(r"\b([A-Z][0-9]{1,2})\b", html)
     unique: list[str] = []
@@ -266,8 +402,15 @@ class RepecIdeasProvider:
 
 
 class JournalSourceCollector:
-    def __init__(self, provider: RepecIdeasProvider | None = None) -> None:
+    def __init__(
+        self,
+        provider: RepecIdeasProvider | None = None,
+        from_date: str = "",
+        until_date: str = "",
+    ) -> None:
         self.provider = provider or RepecIdeasProvider()
+        self.from_date = from_date
+        self.until_date = until_date
 
     def collect(self) -> list[Article]:
         articles: list[Article] = []
@@ -277,6 +420,8 @@ class JournalSourceCollector:
 
     def _collect_for_journal(self, journal: JournalConfig) -> list[Article]:
         seeded: list[Article] = []
+
+        # 1. Try RSS
         if journal.rss_url:
             try:
                 feed = fetch_url(journal.rss_url)
@@ -285,8 +430,16 @@ class JournalSourceCollector:
             if feed:
                 seeded.extend(parse_rss_feed(feed, journal.name))
 
+        # 2. Fallback to Crossref journal search when RSS unavailable or empty
+        if not seeded and journal.issn and self.from_date:
+            until = self.until_date or self.from_date
+            seeded.extend(collect_from_crossref_journal(journal, self.from_date, until))
+
+        # 3. Enrich each article: Crossref by DOI → journal page
         for article in seeded:
             self.provider.enrich(article)
+            if article.source != "crossref-journal":
+                enrich_from_crossref(article)
             enrich_from_journal_page(article)
 
         return seeded
