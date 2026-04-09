@@ -1,0 +1,59 @@
+name: Weekly Merge
+
+on:
+  schedule:
+    - cron: "0 5 * * 5"   # 每周五 UTC 05:00
+  workflow_dispatch:
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compute week label
+        id: week
+        run: |
+          LABEL=$(date -u +%Y-W%V)
+          echo "label=$LABEL" >> $GITHUB_OUTPUT
+
+      - name: Merge daily files from the past 7 days
+        run: |
+          python - <<'EOF'
+          from pathlib import Path
+          from economics_tracker.merger import merge_daily_files
+          from datetime import date, timedelta
+
+          today = date.today()
+          cutoff = today - timedelta(days=7)
+          daily_dir = Path("output/daily")
+          files = sorted(
+              p for p in daily_dir.glob("*.xlsx")
+              if p.stem >= str(cutoff)
+          )
+          print(f"Merging {len(files)} file(s): {[p.name for p in files]}")
+          if not files:
+              print("Nothing to merge.")
+          else:
+              out = merge_daily_files(files, Path("output/weekly/${{ steps.week.outputs.label }}.xlsx"))
+              print(f"Saved: {out}")
+          EOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/weekly/
+          git diff --cached --quiet && echo "No new weekly file" && exit 0
+          git commit -m "weekly: ${{ steps.week.outputs.label }}"
+          git push
